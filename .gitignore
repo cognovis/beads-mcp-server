@@ -1,4 +1,4 @@
-node_modules/
 .env
 logs/
-clients.json
+__pycache__/
+*.pyc
