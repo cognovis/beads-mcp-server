@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Idempotent macmaint `update`-phase extra: keep the beads MCP service on the
+# central Dolt host (dolt-server / erp4projects) current.
+#
+#   1. upgrade the upstream official beads-mcp (uv tool) — the FastMCP server
+#      that serve.py serves over HTTP
+#   2. re-sync the serve.py launcher + .env.example from this repo
+#   3. restart + health-verify, but ONLY when something actually changed
+#
+# Skips cleanly (exit 0) when dolt-server is unreachable, mirroring
+# macmaint-hermes-update. Wire via ~/.config/macmaint/config.toml [[extras]].
+set -euo pipefail
+
+SSH_HOST="dolt-server"
+REMOTE_UV="/root/.local/bin/uv"
+REMOTE_DIR="/opt/beads-mcp-server"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_HOST" true 2>/dev/null; then
+  echo "dolt-server unreachable; skipping beads-mcp update"
+  exit 0
+fi
+
+beadsmcp_ver() {
+  ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_HOST" "$REMOTE_UV tool list 2>/dev/null" \
+    | awk '/^beads-mcp /{print $2; exit}'
+}
+
+CHANGED=false
+
+# 1. upstream beads-mcp (uv tool)
+BEFORE="$(beadsmcp_ver || true)"
+echo "beads-mcp (uv tool) at ${BEFORE:-not-installed}; checking for upgrade..."
+ssh "$SSH_HOST" "$REMOTE_UV tool upgrade beads-mcp 2>&1 || $REMOTE_UV tool install beads-mcp 2>&1" | sed 's/^/  uv: /' || true
+AFTER="$(beadsmcp_ver || true)"
+if [[ "${AFTER:-}" != "${BEFORE:-}" ]]; then
+  echo "beads-mcp upgraded: ${BEFORE:-none} -> ${AFTER:-none}"
+  CHANGED=true
+else
+  echo "beads-mcp already current (${AFTER:-unknown})"
+fi
+
+# 2. serve.py launcher (re-sync from this repo; restart only if it changed)
+RSYNC_OUT="$(rsync -azi \
+  "$SCRIPT_DIR/serve.py" "$SCRIPT_DIR/.env.example" \
+  "$SSH_HOST:$REMOTE_DIR/" 2>&1 || true)"
+if grep -qE '(^|\s)serve\.py' <<<"$RSYNC_OUT"; then
+  echo "serve.py changed; will restart"
+  CHANGED=true
+fi
+
+# 3. restart only when needed; always health-verify
+if [[ "$CHANGED" == true ]]; then
+  echo "restarting beads-mcp-server..."
+  ssh "$SSH_HOST" "systemctl restart beads-mcp-server && sleep 3 && systemctl is-active beads-mcp-server"
+fi
+echo "verifying health..."
+ssh "$SSH_HOST" "curl -fsS http://127.0.0.1:8092/health >/dev/null && echo '  health: ok'"
