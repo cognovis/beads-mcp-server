@@ -41,7 +41,7 @@ def provision():
     and align project_id with the canonical DB. Non-destructive: no writes to
     the canonical Dolt database."""
     dbs = [
-        r["table_schema"]
+        next(iter(r.values()))
         for r in _dolt(
             "SELECT DISTINCT table_schema FROM information_schema.tables "
             "WHERE table_name='issues' ORDER BY table_schema"
