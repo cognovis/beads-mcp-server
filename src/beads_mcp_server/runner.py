@@ -86,6 +86,10 @@ class BdCommandError(RuntimeError):
         self.stderr = stderr
 
 
+class BdExecutableNotFoundError(BdCommandError):
+    """Raised when the configured bd executable cannot be started."""
+
+
 class OutputLimitError(BdCommandError):
     """Raised when bd emits more data than the configured bound."""
 
@@ -124,12 +128,18 @@ class BdRunner:
             "--json",
         )
         started = time.monotonic()
-        process = await self._spawner.spawn(
-            *argv,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=self._environment,
-        )
+        try:
+            process = await self._spawner.spawn(
+                *argv,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=self._environment,
+            )
+        except (FileNotFoundError, PermissionError) as error:
+            self._log(command, workspace, started, "executable_unavailable")
+            raise BdExecutableNotFoundError(
+                f"bd executable is unavailable: {self._bd_path}"
+            ) from error
         try:
             async with asyncio.timeout(self._timeout_seconds):
                 stdout, stderr, returncode = await asyncio.gather(

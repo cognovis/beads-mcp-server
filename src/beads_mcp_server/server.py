@@ -1,5 +1,6 @@
 """Official MCP SDK v2 server and curated tool surface."""
 
+import logging
 from typing import Annotated
 
 from mcp.server import CacheHint, MCPServer
@@ -21,12 +22,17 @@ from beads_mcp_server.service import (
     IssueType,
     Runner,
     ToolResponse,
+    WorkspaceListResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 type Priority = Annotated[int, Field(ge=0, le=4)]
 type ResultLimit = Annotated[int, Field(ge=1, le=1000)]
 
 TOOL_NAMES = (
+    "workspaces",
+    "workspace_status",
     "ready",
     "list",
     "show",
@@ -51,9 +57,10 @@ def create_server(config: ServerConfig, *, runner: Runner | None = None) -> MCPS
         timeout_seconds=config.timeout_seconds,
         max_output_bytes=config.max_output_bytes,
     )
+
     service = BeadsService(registry=config.workspaces, runner=command_runner)
     server = MCPServer(
-        "cognovis-beads",
+        "beads-mcp-server",
         version=__version__,
         description="Stateless typed adapter for bd workspaces",
         token_verifier=StaticTokenVerifier(config.bearer_token),
@@ -67,6 +74,16 @@ def create_server(config: ServerConfig, *, runner: Runner | None = None) -> MCPS
             "tools/list": CacheHint(ttl_ms=60_000, scope="private"),
         },
     )
+
+    @server.tool(name="workspaces")
+    async def workspaces_tool() -> WorkspaceListResponse:
+        """List exact configured repository workspace identifiers."""
+        return service.workspaces()
+
+    @server.tool(name="workspace_status")
+    async def workspace_status_tool(workspace_id: str) -> ToolResponse:
+        """Probe one exact workspace through read-only bd statistics."""
+        return await service.workspace_status(workspace_id)
 
     @server.tool(name="ready")
     async def ready_tool(
@@ -237,8 +254,30 @@ def create_server(config: ServerConfig, *, runner: Runner | None = None) -> MCPS
 
     @server.custom_route("/health", methods=["GET"], include_in_schema=False)
     async def health(_: Request) -> JSONResponse:
+        return JSONResponse({"status": "ok", "service": "beads-mcp-server", "version": __version__})
+
+    @server.custom_route("/ready", methods=["GET"], include_in_schema=False)
+    async def readiness(_: Request) -> JSONResponse:
+        workspace_id = config.readiness_workspace_id
+        if workspace_id is None:
+            return JSONResponse(
+                {"status": "not_ready", "service": "beads-mcp-server"},
+                status_code=503,
+            )
+        try:
+            await service.workspace_status(workspace_id)
+        except Exception:
+            logger.exception("Readiness workspace probe failed")
+            return JSONResponse(
+                {"status": "not_ready", "service": "beads-mcp-server"},
+                status_code=503,
+            )
         return JSONResponse(
-            {"status": "ok", "service": "cognovis-beads-mcp", "version": __version__}
+            {
+                "status": "ready",
+                "service": "beads-mcp-server",
+                "workspace_count": len(config.workspaces.ids()),
+            }
         )
 
     return server

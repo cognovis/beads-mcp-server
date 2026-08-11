@@ -31,12 +31,26 @@ class ToolResponse(BaseModel):
     data: Any
 
 
+class WorkspaceListResponse(BaseModel):
+    """Public MCP representation of configured workspace identifiers."""
+
+    workspace_ids: list[str]
+
+
 class BeadsService:
     """Expose only the bd operations supported by this server."""
 
     def __init__(self, *, registry: WorkspaceRegistry, runner: Runner) -> None:
         self._registry = registry
         self._runner = runner
+
+    def workspaces(self) -> WorkspaceListResponse:
+        """List exact IDs without exposing server filesystem paths."""
+        return WorkspaceListResponse(workspace_ids=list(self._registry.ids()))
+
+    async def workspace_status(self, workspace_id: str) -> ToolResponse:
+        """Probe one workspace through a read-only bd statistics call."""
+        return await self._execute(workspace_id, "stats", "--no-activity")
 
     async def ready(
         self,

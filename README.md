@@ -1,4 +1,4 @@
-# Cognovis Beads MCP Server
+# Beads MCP Server
 
 An owned Python MCP server built on the official MCP SDK v2. It exposes a
 curated typed surface over `bd` and keeps `bd` as the Beads domain authority.
@@ -31,10 +31,12 @@ agents should be measured before adding coordination that may duplicate what
 
 ## Tool surface
 
-The server exposes `ready`, `list`, `show`, `create`, `claim`, `update`,
-`close`, `reopen`, `dep`, `comment`, `comments`, `note`, `stats`, and `blocked`.
-There is no mutable context tool, cwd discovery, arbitrary command passthrough,
-workspace provisioning, or direct Dolt operation.
+The server exposes `workspaces`, `workspace_status`, `ready`, `list`, `show`,
+`create`, `claim`, `update`, `close`, `reopen`, `dep`, `comment`, `comments`,
+`note`, `stats`, and `blocked`. `workspaces` returns only exact IDs and never
+server paths. `workspace_status` performs a read-only `bd stats --no-activity`
+probe for one ID. There is no mutable context tool, cwd discovery, arbitrary
+command passthrough, workspace provisioning, or direct Dolt operation.
 
 ## Configuration
 
@@ -43,20 +45,30 @@ set values through the operator's secret-management process. The service fails
 closed when the bearer token, public URL, allowed hosts, or workspace registry
 is absent.
 
-The registry is a JSON object:
+For a central service with many repositories, point the server at an
+operator-controlled root:
 
 ```text
-BEADS_WORKSPACES_JSON={"hetzner":"/opt/beads-workspaces/hetzner","polaris":"/opt/beads-workspaces/polaris"}
+BEADS_WORKSPACE_ROOT=/srv/beads-workspaces
+BEADS_READINESS_WORKSPACE_ID=project-a
 ```
+
+Every immediate child containing `.beads/metadata.json` or
+`.beads/config.yaml` becomes one exact `workspace_id`. The server never scans
+components of a client path and never treats dashes and underscores as aliases.
+Consequently, `library`, `cognovis_core`, and `cognovis-core` can coexist
+without ambiguity. An explicit `BEADS_WORKSPACES_JSON` object remains available
+for installations that prefer a fixed mapping; configure exactly one source.
 
 Only these variables can reach `bd` when present: `PATH`, `HOME`, `USER`,
 `LOGNAME`, `LANG`, `LC_ALL`, `BEADS_ACTOR`, `BEADS_DOLT_SERVER_HOST`,
 `BEADS_DOLT_SERVER_PORT`, `BEADS_DOLT_SERVER_USER`, `BEADS_DOLT_PASSWORD`, and
 `DOLT_PASSWORD`. The server never logs their values.
 
-The public `/health` route returns only service identity, version, and status.
-The `/mcp` route requires the configured static bearer token. Host and Origin
-validation is enforced by the SDK's `TransportSecuritySettings`.
+The public `/health` route is a process liveness check. `/ready` performs one
+configured read-only workspace probe and returns no workspace ID or filesystem
+path. The `/mcp` route requires the configured static bearer token. Host and
+Origin validation is enforced by the SDK's `TransportSecuritySettings`.
 
 ## Local development
 
@@ -78,20 +90,17 @@ uv run beads-mcp-server
 
 ## Deployment boundary
 
-`deploy.sh` syncs the package sources and lockfile, installs with
-`uv sync --frozen --no-dev`, restarts the existing systemd service, and checks
-the local health endpoint. It does not copy `.env`, create a token, modify
-workspace metadata, or initialize a Beads database.
-
-The systemd service must execute:
+This repository contains the reusable package rather than a specific server's
+deployment. Install with `uv sync --frozen --no-dev` and run:
 
 ```text
-/opt/beads-mcp-server/.venv/bin/beads-mcp-server
+.venv/bin/beads-mcp-server
 ```
 
-This repository change does not itself deploy the service. Updating the Atlas
-unit and validating real configured clients remains a separate infrastructure
-cutover with rollback evidence.
+Keep service-manager units, reverse-proxy rules, concrete hostnames, secret
+delivery, and workspace locations in the consuming infrastructure repository.
+The server does not copy an environment file, create a token, initialize a
+Beads database, or rewrite workspace metadata.
 
 ## Compatibility evidence
 
@@ -105,3 +114,7 @@ disables legacy back-channels; this server has no server-initiated requests or
 legacy notifications that require them. Official final-spec conformance is run
 against a local HTTP endpoint before release and is reported separately from
 unit and client compatibility evidence.
+
+## License
+
+Released under the [MIT License](LICENSE).

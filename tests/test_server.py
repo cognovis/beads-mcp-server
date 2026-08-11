@@ -15,15 +15,18 @@ class SurfaceRunner:
         )
 
 
-def make_config() -> ServerConfig:
+def make_config(tmp_path: Path) -> ServerConfig:
+    metadata = tmp_path / "hetzner" / ".beads" / "metadata.json"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text("{}")
     return ServerConfig(
         bearer_token="test-token",
-        workspaces=WorkspaceRegistry({"hetzner": Path("/srv/beads/hetzner")}),
+        workspaces=WorkspaceRegistry.from_root(tmp_path),
     )
 
 
-async def test_sdk_v2_discovers_deterministic_curated_tool_surface() -> None:
-    server = create_server(make_config(), runner=SurfaceRunner())
+async def test_sdk_v2_discovers_deterministic_curated_tool_surface(tmp_path: Path) -> None:
+    server = create_server(make_config(tmp_path), runner=SurfaceRunner())
 
     async with Client(server, raise_exceptions=True) as client:
         result = await client.list_tools()
@@ -31,8 +34,8 @@ async def test_sdk_v2_discovers_deterministic_curated_tool_surface() -> None:
     assert [tool.name for tool in result.tools] == list(TOOL_NAMES)
 
 
-async def test_sdk_v2_calls_typed_show_tool() -> None:
-    server = create_server(make_config(), runner=SurfaceRunner())
+async def test_sdk_v2_calls_typed_show_tool(tmp_path: Path) -> None:
+    server = create_server(make_config(tmp_path), runner=SurfaceRunner())
 
     async with Client(server, raise_exceptions=True) as client:
         result = await client.call_tool(
@@ -52,10 +55,23 @@ async def test_sdk_v2_calls_typed_show_tool() -> None:
     }
 
 
-async def test_sdk_v2_rejects_missing_workspace_id_at_schema_boundary() -> None:
-    server = create_server(make_config(), runner=SurfaceRunner())
+async def test_sdk_v2_rejects_missing_workspace_id_at_schema_boundary(
+    tmp_path: Path,
+) -> None:
+    server = create_server(make_config(tmp_path), runner=SurfaceRunner())
 
     async with Client(server) as client:
         result = await client.call_tool("stats", {})
 
     assert result.is_error is True
+
+
+async def test_sdk_v2_lists_exact_workspace_ids_without_server_paths(tmp_path: Path) -> None:
+    server = create_server(make_config(tmp_path), runner=SurfaceRunner())
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("workspaces", {})
+
+    assert result.is_error is False
+    assert result.structured_content == {"workspace_ids": ["hetzner"]}
+    assert str(tmp_path) not in str(result.structured_content)

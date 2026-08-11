@@ -4,7 +4,12 @@ from typing import Any
 
 import pytest
 
-from beads_mcp_server.runner import BdCommandError, BdRunner, OutputLimitError
+from beads_mcp_server.runner import (
+    BdCommandError,
+    BdExecutableNotFoundError,
+    BdRunner,
+    OutputLimitError,
+)
 
 
 class FakeProcess:
@@ -60,6 +65,11 @@ class FakeSpawner:
         return self.process
 
 
+class MissingExecutableSpawner:
+    async def spawn(self, *argv: str, **kwargs: Any) -> FakeProcess:
+        raise FileNotFoundError(argv[0])
+
+
 async def test_runner_uses_argv_directory_and_explicit_environment() -> None:
     spawner = FakeSpawner(FakeProcess(stdout=b'{"id":"hetzner-ci8"}'))
     runner = BdRunner(
@@ -82,6 +92,16 @@ async def test_runner_uses_argv_directory_and_explicit_environment() -> None:
     assert kwargs["env"] == {"PATH": "/usr/local/bin", "BEADS_ACTOR": "mcp"}
     assert "shell" not in kwargs
     assert result.data == {"id": "hetzner-ci8"}
+
+
+async def test_runner_reports_missing_executable_separately() -> None:
+    runner = BdRunner(
+        bd_path=Path("/missing/bd"),
+        spawner=MissingExecutableSpawner(),
+    )
+
+    with pytest.raises(BdExecutableNotFoundError, match="/missing/bd"):
+        await runner.run(Path("/srv/hetzner"), "stats")
 
 
 async def test_runner_rejects_oversized_output() -> None:

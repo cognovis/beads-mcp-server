@@ -18,10 +18,14 @@ class HttpRunner:
 
 
 @pytest.fixture
-def app() -> Starlette:
+def app(tmp_path: Path) -> Starlette:
+    metadata = tmp_path / "hetzner" / ".beads" / "metadata.json"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text("{}")
     config = ServerConfig(
         bearer_token="test-token",
-        workspaces=WorkspaceRegistry({"hetzner": Path("/srv/beads/hetzner")}),
+        workspaces=WorkspaceRegistry.from_root(tmp_path),
+        readiness_workspace_id="hetzner",
         host="127.0.0.1",
         allowed_hosts=("mcp.test",),
         allowed_origins=("https://client.test",),
@@ -90,8 +94,22 @@ async def test_health_is_public_and_contains_no_sensitive_configuration(app: Sta
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "service": "cognovis-beads-mcp",
+        "service": "beads-mcp-server",
         "version": "0.1.0",
+    }
+
+
+async def test_readiness_probes_one_configured_workspace_without_exposing_ids(
+    app: Starlette,
+) -> None:
+    async with app.router.lifespan_context(app), client(app) as http_client:
+        response = await http_client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ready",
+        "service": "beads-mcp-server",
+        "workspace_count": 1,
     }
 
 

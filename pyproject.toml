@@ -3,17 +3,23 @@ requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cognovis-beads-mcp"
+name = "beads-mcp-server"
 version = "0.1.0"
 description = "Stateless MCP SDK v2 adapter for the bd command-line client"
 readme = "README.md"
 requires-python = ">=3.14"
+license = "MIT"
+authors = [{ name = "Cognovis" }]
 dependencies = [
   "mcp>=2.0.0,<3",
   "pydantic>=2.12,<3",
   "starlette>=0.47,<1",
   "uvicorn>=0.35,<1",
 ]
+
+[project.urls]
+Repository = "https://github.com/cognovis/beads-mcp-server"
+Issues = "https://github.com/cognovis/beads-mcp-server/issues"
 
 [project.scripts]
 beads-mcp-server = "beads_mcp_server.cli:main"
@@ -39,4 +45,3 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-
