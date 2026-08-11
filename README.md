@@ -1,75 +1,107 @@
-# beads-mcp-server
+# Cognovis Beads MCP Server
 
-Thin **FastMCP HTTP launcher** that serves the official `beads-mcp` over
-Streamable HTTP with a **static bearer token**, so fleet agents (Hermes, your own
-tools) can read/write beads across all repos **without a local checkout** — all
-data lives on the central Dolt server.
-
-## Why this exists
-
-The official `beads-mcp` (gastownhall/beads, FastMCP-based) is **stdio-only and
-single-repo** out of the box (`main()` calls `mcp.run_async(transport="stdio")`).
-But:
-
-- FastMCP supports **Streamable HTTP transport + auth** natively.
-- `beads-mcp` already supports **multi-repo** via the `workspace_root` tool param.
-
-So instead of a custom HTTP/OAuth gateway, `serve.py` just imports the official
-`beads_mcp.server:mcp`, attaches a `StaticTokenVerifier` (one fixed token from
-`.env`), and runs it over HTTP. ~70 lines, no bespoke protocol code.
-
-> History: this replaced a ~600-line Node OAuth 2.1 wrapper (2026-06-26). That
-> wrapper spawned a fresh `beads-mcp` **per HTTP session**, so every interactive
-> call paid Python startup + Dolt cold-load (~14s, felt like a hang). One
-> persistent FastMCP process removes that: connect ~150ms, warm call ~0.6s.
+An owned Python MCP server built on the official MCP SDK v2. It exposes a
+curated typed surface over `bd` and keeps `bd` as the Beads domain authority.
 
 ## Architecture
 
+```text
+MCP SDK v2 Streamable HTTP
+  -> static bearer verification
+  -> typed tools with mandatory workspace_id
+  -> explicit workspace registry
+  -> one bounded async bd subprocess per call
+  -> workspace-configured shared Dolt server
 ```
-client --HTTPS--> Caddy (dolt.cognovis.de/mcp) --> FastMCP HTTP :8092 (serve.py)
-                                                       |  static bearer auth
-                                                       v
-                                          official beads-mcp tools (workspace_root)
-                                                       v
-                                          bd  -->  central Dolt SQL :3306
+
+The server does not import or wrap the upstream `beads-mcp` package. It never
+queries Dolt directly and does not reproduce Beads business logic. Each call
+starts a fresh `bd` process using an argv list, a hard timeout, bounded stdout
+and stderr, cancellation cleanup, and an explicit child-environment allowlist.
+
+Protocol sessions are not application state. Modern 2026-07-28 requests are
+sessionless and every workspace-sensitive call carries `workspace_id`. The
+registry resolves that stable identifier to an operator-controlled absolute
+path; clients cannot submit filesystem paths.
+
+The first release deliberately has no request queue, semaphore, per-workspace
+lock, connection pool, or Dolt adapter. Sparse traffic from 40 to 50 connected
+agents should be measured before adding coordination that may duplicate what
+`bd` and the shared Dolt server already provide.
+
+## Tool surface
+
+The server exposes `ready`, `list`, `show`, `create`, `claim`, `update`,
+`close`, `reopen`, `dep`, `comment`, `comments`, `note`, `stats`, and `blocked`.
+There is no mutable context tool, cwd discovery, arbitrary command passthrough,
+workspace provisioning, or direct Dolt operation.
+
+## Configuration
+
+Copy `.env.example` to the service's existing protected environment file and
+set values through the operator's secret-management process. The service fails
+closed when the bearer token, public URL, allowed hosts, or workspace registry
+is absent.
+
+The registry is a JSON object:
+
+```text
+BEADS_WORKSPACES_JSON={"hetzner":"/opt/beads-workspaces/hetzner","polaris":"/opt/beads-workspaces/polaris"}
 ```
 
-- Runs on **erp4projects** / `dolt.cognovis.de` (Hetzner), next to
-  `dolt-server.service`. Loopback-only; Caddy terminates TLS + routes `/mcp`.
-- Per-repo **server-mode** workspaces under `/opt/beads-workspaces/<repo>` connect
-  to every Dolt database that carries a Beads `issues` table. Conventional
-  `beads_<repo>` databases map to `<repo>`; legacy databases without that prefix
-  retain their full database name. `serve.py` self-heals the workspaces on startup
-  (forces `dolt_mode: server`, aligns `project_id` with the DB) and pre-warms hot
-  repos (`BEADS_PREWARM_REPOS`).
+Only these variables can reach `bd` when present: `PATH`, `HOME`, `USER`,
+`LOGNAME`, `LANG`, `LC_ALL`, `BEADS_ACTOR`, `BEADS_DOLT_SERVER_HOST`,
+`BEADS_DOLT_SERVER_PORT`, `BEADS_DOLT_SERVER_USER`, `BEADS_DOLT_PASSWORD`, and
+`DOLT_PASSWORD`. The server never logs their values.
 
-## Auth
+The public `/health` route returns only service identity, version, and status.
+The `/mcp` route requires the configured static bearer token. Host and Origin
+validation is enforced by the SDK's `TransportSecuritySettings`.
 
-Static bearer token (`BEADS_MCP_TOKEN` in `.env`), validated by FastMCP's
-`StaticTokenVerifier`. Clients send `Authorization: Bearer <token>`.
+## Local development
 
-> Trade-off: no OAuth 2.1 dynamic client registration -> the **claude.ai / iOS**
-> custom-connector flow (which requires DCR) is not supported. Hermes and any
-> bearer-capable client work fine. Re-add an OAuth proxy (FastMCP `OAuthProxy`)
-> if claude.ai connector support is needed again.
-
-## Run / deploy
-
-Inner MCP (once, on the host): `uv tool install beads-mcp`
-Then:
+Python 3.14 and `uv` are required.
 
 ```bash
-./deploy.sh           # rsync serve.py + restart the service
+uv sync --frozen
+uv run pytest -q
+uv run ruff check .
+uv run ruff format --check .
+uv build
 ```
 
-systemd unit, hardening drop-in, and ops notes live in
-`infra-devops/hetzner/atlas/services/beads-mcp/`. Secrets in
-`/opt/beads-mcp-server/.env` (not in git) — see `.env.example`.
+Run the service with an operator-provided environment:
 
-## Known residual: Dolt cold-load
+```bash
+uv run beads-mcp-server
+```
 
-The structural per-session cost is gone, but the **first** call to a repo that
-Dolt has evicted still pays a lazy DB-load (~9s for large repos like
-mira/polaris); subsequent calls are ~0.6s. `BEADS_PREWARM_REPOS` only mitigates
-transiently — the durable fix is Dolt-side memory/cache tuning so working sets
-stay resident.
+## Deployment boundary
+
+`deploy.sh` syncs the package sources and lockfile, installs with
+`uv sync --frozen --no-dev`, restarts the existing systemd service, and checks
+the local health endpoint. It does not copy `.env`, create a token, modify
+workspace metadata, or initialize a Beads database.
+
+The systemd service must execute:
+
+```text
+/opt/beads-mcp-server/.venv/bin/beads-mcp-server
+```
+
+This repository change does not itself deploy the service. Updating the Atlas
+unit and validating real configured clients remains a separate infrastructure
+cutover with rollback evidence.
+
+## Compatibility evidence
+
+The test suite uses the official in-memory SDK client for modern discovery and
+typed tool calls. HTTP integration tests exercise the real ASGI transport,
+bearer rejection, Host and Origin rejection, and independent 2026-07-28
+requests without `Mcp-Session-Id`.
+
+No handshake-era client behavior is promised. `stateless_http=True` therefore
+disables legacy back-channels; this server has no server-initiated requests or
+legacy notifications that require them. Official final-spec conformance is run
+against a local HTTP endpoint before release and is reported separately from
+unit and client compatibility evidence.
