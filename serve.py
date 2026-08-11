@@ -63,7 +63,6 @@ def provision():
                 print(f"[provision] init {prefix}", flush=True)
             except Exception as e:
                 print(f"[provision]   init failed {prefix}: {e}", flush=True)
-            continue
         try:
             meta = json.loads(meta_path.read_text()); changed = False
             if meta.get("dolt_mode") != "server":
