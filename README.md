@@ -37,7 +37,9 @@ client --HTTPS--> Caddy (dolt.cognovis.de/mcp) --> FastMCP HTTP :8092 (serve.py)
 - Runs on **erp4projects** / `dolt.cognovis.de` (Hetzner), next to
   `dolt-server.service`. Loopback-only; Caddy terminates TLS + routes `/mcp`.
 - Per-repo **server-mode** workspaces under `/opt/beads-workspaces/<repo>` connect
-  to the canonical `beads_<repo>` databases. `serve.py` self-heals them on startup
+  to every Dolt database that carries a Beads `issues` table. Conventional
+  `beads_<repo>` databases map to `<repo>`; legacy databases without that prefix
+  retain their full database name. `serve.py` self-heals the workspaces on startup
   (forces `dolt_mode: server`, aligns `project_id` with the DB) and pre-warms hot
   repos (`BEADS_PREWARM_REPOS`).
 

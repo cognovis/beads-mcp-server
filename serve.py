@@ -40,12 +40,18 @@ def provision():
     We heal those in place: force server mode, write the dolt-server.port file,
     and align project_id with the canonical DB. Non-destructive: no writes to
     the canonical Dolt database."""
-    dbs = [list(r.values())[0] for r in _dolt("SHOW DATABASES LIKE 'beads_%'")]
+    dbs = [
+        r["table_schema"]
+        for r in _dolt(
+            "SELECT DISTINCT table_schema FROM information_schema.tables "
+            "WHERE table_name='issues' ORDER BY table_schema"
+        )
+    ]
     print(f"[provision] {len(dbs)} beads databases", flush=True)
     Path(WORK_DIR).mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "BEADS_DOLT_PASSWORD": DOLT_PW}
     for db in dbs:
-        prefix = db[len("beads_"):]
+        prefix = db[len("beads_"):] if db.startswith("beads_") else db
         ws = Path(WORK_DIR) / prefix
         meta_path = ws / ".beads" / "metadata.json"
         if not meta_path.exists():
