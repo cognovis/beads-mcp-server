@@ -8,7 +8,7 @@ curated typed surface over `bd` and keeps `bd` as the Beads domain authority.
 ```text
 MCP SDK v2 Streamable HTTP
   -> static bearer verification
-  -> typed tools with mandatory workspace_id
+  -> typed tools with mandatory workspace_id and request actor for mutations
   -> explicit workspace registry
   -> one bounded async bd subprocess per call
   -> workspace-configured shared Dolt server
@@ -33,10 +33,20 @@ agents should be measured before adding coordination that may duplicate what
 
 The server exposes `workspaces`, `workspace_status`, `ready`, `list`, `show`,
 `create`, `claim`, `update`, `close`, `reopen`, `dep`, `comment`, `comments`,
-`note`, `stats`, and `blocked`. `workspaces` returns only exact IDs and never
-server paths. `workspace_status` performs a read-only `bd stats --no-activity`
-probe for one ID. There is no mutable context tool, cwd discovery, arbitrary
-command passthrough, workspace provisioning, or direct Dolt operation.
+`note`, `heartbeat`, `unclaim`, `reclaim`, `stats`, and `blocked`. `workspaces`
+returns only exact IDs and never server paths. `workspace_status` performs a
+read-only `bd stats --no-activity` probe for one ID. There is no mutable context
+tool, cwd discovery, arbitrary command passthrough, workspace provisioning, or
+direct Dolt operation.
+
+Every mutating call carries a validated `actor`, which the runner passes as the
+global `bd --actor` argument. A worker must use the same stable actor for claim,
+heartbeat, and close. The server never changes an assignee during close and
+never exposes a force flag. Assignee changes through `update` require
+`if_assignee` compare-and-swap protection. Dead-worker recovery is explicit
+through `reclaim`, limited to stale leases on the local replica; cross-replica
+override is not exposed. Actor/assignee failures return a bounded, redacted
+`BD_ASSIGNEE_MISMATCH` diagnostic with the supported recovery choices.
 
 ## Configuration
 
@@ -63,7 +73,9 @@ for installations that prefer a fixed mapping; configure exactly one source.
 Only these variables can reach `bd` when present: `PATH`, `HOME`, `USER`,
 `LOGNAME`, `LANG`, `LC_ALL`, `BEADS_ACTOR`, `BEADS_DOLT_SERVER_HOST`,
 `BEADS_DOLT_SERVER_PORT`, `BEADS_DOLT_SERVER_USER`, `BEADS_DOLT_PASSWORD`, and
-`DOLT_PASSWORD`. The server never logs their values.
+`DOLT_PASSWORD`. The server never logs their values. `BEADS_ACTOR` remains only
+a process fallback for read-only calls and legacy direct use; MCP mutations use
+their explicit request actor.
 
 The public `/health` route is a process liveness check. `/ready` performs one
 configured read-only workspace probe and returns no workspace ID or filesystem

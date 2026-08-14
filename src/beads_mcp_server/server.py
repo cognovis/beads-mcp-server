@@ -29,6 +29,14 @@ logger = logging.getLogger(__name__)
 
 type Priority = Annotated[int, Field(ge=0, le=4)]
 type ResultLimit = Annotated[int, Field(ge=1, le=1000)]
+type Actor = Annotated[
+    str,
+    Field(min_length=1, max_length=128, pattern=r"^\S(?:[^\r\n\x00]*\S)?$"),
+]
+type ReclaimDuration = Annotated[
+    str,
+    Field(min_length=2, max_length=32, pattern=r"^[0-9][0-9A-Za-z.]*$"),
+]
 
 TOOL_NAMES = (
     "workspaces",
@@ -45,6 +53,9 @@ TOOL_NAMES = (
     "comment",
     "comments",
     "note",
+    "heartbeat",
+    "unclaim",
+    "reclaim",
     "stats",
     "blocked",
 )
@@ -148,6 +159,7 @@ def create_server(config: ServerConfig, *, runner: Runner | None = None) -> MCPS
     async def create_tool(
         workspace_id: str,
         title: str,
+        actor: Actor,
         issue_type: IssueType = "task",
         priority: Priority = 2,
         description: str | None = None,
@@ -160,6 +172,7 @@ def create_server(config: ServerConfig, *, runner: Runner | None = None) -> MCPS
         """Create an issue through the supported bd fields."""
         return await service.create(
             workspace_id,
+            actor=actor,
             title=title,
             issue_type=issue_type,
             priority=priority,
@@ -172,19 +185,21 @@ def create_server(config: ServerConfig, *, runner: Runner | None = None) -> MCPS
         )
 
     @server.tool(name="claim")
-    async def claim_tool(workspace_id: str, issue_id: str) -> ToolResponse:
-        """Atomically claim an issue for the configured bd actor."""
-        return await service.claim(workspace_id, issue_id)
+    async def claim_tool(workspace_id: str, issue_id: str, actor: Actor) -> ToolResponse:
+        """Atomically claim an issue for the explicit request actor."""
+        return await service.claim(workspace_id, issue_id, actor=actor)
 
     @server.tool(name="update")
     async def update_tool(
         workspace_id: str,
         issue_id: str,
+        actor: Actor,
         title: str | None = None,
         status: IssueStatus | None = None,
         priority: Priority | None = None,
         issue_type: IssueType | None = None,
         assignee: str | None = None,
+        if_assignee: str | None = None,
         description: str | None = None,
         acceptance: str | None = None,
         add_labels: list[str] | None = None,
@@ -194,11 +209,13 @@ def create_server(config: ServerConfig, *, runner: Runner | None = None) -> MCPS
         return await service.update(
             workspace_id,
             issue_id,
+            actor=actor,
             title=title,
             status=status,
             priority=priority,
             issue_type=issue_type,
             assignee=assignee,
+            if_assignee=if_assignee,
             description=description,
             acceptance=acceptance,
             add_labels=add_labels,
@@ -206,16 +223,24 @@ def create_server(config: ServerConfig, *, runner: Runner | None = None) -> MCPS
         )
 
     @server.tool(name="close")
-    async def close_tool(workspace_id: str, issue_id: str, reason: str) -> ToolResponse:
+    async def close_tool(
+        workspace_id: str,
+        issue_id: str,
+        reason: str,
+        actor: Actor,
+    ) -> ToolResponse:
         """Close one verified issue with an explicit reason."""
-        return await service.close(workspace_id, issue_id, reason=reason)
+        return await service.close(workspace_id, issue_id, reason=reason, actor=actor)
 
     @server.tool(name="reopen")
     async def reopen_tool(
-        workspace_id: str, issue_id: str, reason: str | None = None
+        workspace_id: str,
+        issue_id: str,
+        actor: Actor,
+        reason: str | None = None,
     ) -> ToolResponse:
         """Reopen one closed issue."""
-        return await service.reopen(workspace_id, issue_id, reason=reason)
+        return await service.reopen(workspace_id, issue_id, actor=actor, reason=reason)
 
     @server.tool(name="dep")
     async def dependency_tool(
@@ -223,14 +248,23 @@ def create_server(config: ServerConfig, *, runner: Runner | None = None) -> MCPS
         operation: DependencyOperation,
         issue_id: str,
         depends_on_id: str | None = None,
+        actor: Actor | None = None,
     ) -> ToolResponse:
         """Add, remove, or list dependencies for one issue."""
-        return await service.dependency(workspace_id, operation, issue_id, depends_on_id)
+        return await service.dependency(
+            workspace_id,
+            operation,
+            issue_id,
+            depends_on_id,
+            actor=actor,
+        )
 
     @server.tool(name="comment")
-    async def comment_tool(workspace_id: str, issue_id: str, text: str) -> ToolResponse:
+    async def comment_tool(
+        workspace_id: str, issue_id: str, text: str, actor: Actor
+    ) -> ToolResponse:
         """Add a comment to one issue."""
-        return await service.comment(workspace_id, issue_id, text)
+        return await service.comment(workspace_id, issue_id, text, actor=actor)
 
     @server.tool(name="comments")
     async def comments_tool(workspace_id: str, issue_id: str) -> ToolResponse:
@@ -238,9 +272,48 @@ def create_server(config: ServerConfig, *, runner: Runner | None = None) -> MCPS
         return await service.comments(workspace_id, issue_id)
 
     @server.tool(name="note")
-    async def note_tool(workspace_id: str, issue_id: str, text: str) -> ToolResponse:
+    async def note_tool(workspace_id: str, issue_id: str, text: str, actor: Actor) -> ToolResponse:
         """Append an audit note to one issue."""
-        return await service.note(workspace_id, issue_id, text)
+        return await service.note(workspace_id, issue_id, text, actor=actor)
+
+    @server.tool(name="heartbeat")
+    async def heartbeat_tool(workspace_id: str, issue_id: str, actor: Actor) -> ToolResponse:
+        """Refresh the request actor's claim lease."""
+        return await service.heartbeat(workspace_id, issue_id, actor=actor)
+
+    @server.tool(name="unclaim")
+    async def unclaim_tool(
+        workspace_id: str,
+        issue_id: str,
+        actor: Actor,
+        reason: str | None = None,
+        if_assignee: str | None = None,
+    ) -> ToolResponse:
+        """Explicitly release the request actor's claim without force."""
+        return await service.unclaim(
+            workspace_id,
+            issue_id,
+            actor=actor,
+            reason=reason,
+            if_assignee=if_assignee,
+        )
+
+    @server.tool(name="reclaim")
+    async def reclaim_tool(
+        workspace_id: str,
+        actor: Actor,
+        issue_ids: list[str] | None = None,
+        assignees: list[str] | None = None,
+        older_than: ReclaimDuration = "10m",
+    ) -> ToolResponse:
+        """Explicitly reap stale local-replica claims without force."""
+        return await service.reclaim(
+            workspace_id,
+            actor=actor,
+            issue_ids=issue_ids,
+            assignees=assignees,
+            older_than=older_than,
+        )
 
     @server.tool(name="stats")
     async def stats_tool(workspace_id: str) -> ToolResponse:
