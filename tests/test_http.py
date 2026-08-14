@@ -13,7 +13,13 @@ from beads_mcp_server.server import create_http_app
 
 
 class HttpRunner:
-    async def run(self, workspace: Path, command: str, *arguments: str) -> BdResult:
+    async def run(
+        self,
+        workspace: Path,
+        command: str,
+        *arguments: str,
+        actor: str | None = None,
+    ) -> BdResult:
         return BdResult(data={"workspace": workspace.name, "command": command}, elapsed_ms=2)
 
 

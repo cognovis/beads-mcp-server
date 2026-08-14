@@ -117,16 +117,22 @@ class BdRunner:
         """Copy only explicitly approved variables into the child environment."""
         return {name: environment[name] for name in _ALLOWED_ENVIRONMENT if environment.get(name)}
 
-    async def run(self, workspace: Path, command: str, *arguments: str) -> BdResult:
+    async def run(
+        self,
+        workspace: Path,
+        command: str,
+        *arguments: str,
+        actor: str | None = None,
+    ) -> BdResult:
         """Run bd with JSON output in one explicitly selected workspace."""
-        argv = (
+        global_arguments = (
             str(self._bd_path),
             "--directory",
             str(workspace),
-            command,
-            *arguments,
-            "--json",
         )
+        if actor is not None:
+            global_arguments += ("--actor", actor)
+        argv = (*global_arguments, command, *arguments, "--json")
         started = time.monotonic()
         try:
             process = await self._spawner.spawn(

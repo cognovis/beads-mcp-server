@@ -94,6 +94,34 @@ async def test_runner_uses_argv_directory_and_explicit_environment() -> None:
     assert result.data == {"id": "hetzner-ci8"}
 
 
+async def test_runner_passes_request_actor_as_global_bd_flag() -> None:
+    spawner = FakeSpawner(FakeProcess(stdout=b'{"id":"hetzner-ci8"}'))
+    runner = BdRunner(bd_path=Path("/usr/local/bin/bd"), spawner=spawner)
+
+    await runner.run(
+        Path("/srv/hetzner"),
+        "close",
+        "hetzner-ci8",
+        "--reason",
+        "Verified",
+        actor="codex-clc-trhu",
+    )
+
+    argv, _ = spawner.calls[0]
+    assert argv == (
+        "/usr/local/bin/bd",
+        "--directory",
+        "/srv/hetzner",
+        "--actor",
+        "codex-clc-trhu",
+        "close",
+        "hetzner-ci8",
+        "--reason",
+        "Verified",
+        "--json",
+    )
+
+
 async def test_runner_reports_missing_executable_separately() -> None:
     runner = BdRunner(
         bd_path=Path("/missing/bd"),

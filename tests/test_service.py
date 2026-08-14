@@ -11,9 +11,17 @@ from beads_mcp_server.service import BeadsService
 class RecordingRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[Path, str, tuple[str, ...]]] = []
+        self.actors: list[str | None] = []
 
-    async def run(self, workspace: Path, command: str, *arguments: str) -> BdResult:
+    async def run(
+        self,
+        workspace: Path,
+        command: str,
+        *arguments: str,
+        actor: str | None = None,
+    ) -> BdResult:
         self.calls.append((workspace, command, arguments))
+        self.actors.append(actor)
         return BdResult(data={"command": command, "arguments": list(arguments)}, elapsed_ms=7)
 
 
@@ -63,6 +71,7 @@ async def test_create_uses_only_curated_flags(
 
     await beads.create(
         "hetzner",
+        actor="codex-clc-trhu",
         title="Build SDK v2 server",
         issue_type="feature",
         priority=1,
@@ -102,7 +111,7 @@ async def test_empty_update_is_rejected_without_running_bd(
     beads, runner = service
 
     with pytest.raises(ValueError, match="at least one field"):
-        await beads.update("hetzner", "hetzner-ci8")
+        await beads.update("hetzner", "hetzner-ci8", actor="codex-clc-trhu")
 
     assert runner.calls == []
 
@@ -124,8 +133,19 @@ async def test_dependency_and_notes_have_explicit_operations(
 ) -> None:
     beads, runner = service
 
-    await beads.dependency("hetzner", "add", "hetzner-ci8", "hetzner-base")
-    await beads.note("hetzner", "hetzner-ci8", "Architecture decision recorded.")
+    await beads.dependency(
+        "hetzner",
+        "add",
+        "hetzner-ci8",
+        "hetzner-base",
+        actor="codex-clc-trhu",
+    )
+    await beads.note(
+        "hetzner",
+        "hetzner-ci8",
+        "Architecture decision recorded.",
+        actor="codex-clc-trhu",
+    )
 
     assert runner.calls == [
         (
@@ -146,7 +166,7 @@ async def test_comment_text_cannot_be_parsed_as_a_bd_flag(
 ) -> None:
     beads, runner = service
 
-    await beads.comment("hetzner", "hetzner-ci8", "--help")
+    await beads.comment("hetzner", "hetzner-ci8", "--help", actor="codex-clc-trhu")
 
     assert runner.calls == [
         (
