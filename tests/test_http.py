@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 import pytest
+from mcp.types import HEADER_MISMATCH
 from starlette.applications import Starlette
 
 from beads_mcp_server.config import ServerConfig, WorkspaceRegistry
@@ -205,3 +206,76 @@ async def test_transport_security_rejects_unlisted_origin(app: Starlette) -> Non
         )
 
     assert response.status_code == 403
+
+
+def _header_mismatch_error(response: httpx.Response) -> dict[str, object]:
+    assert response.status_code == 400
+    payload = response.json()
+    error = payload["error"]
+    assert payload["jsonrpc"] == "2.0"
+    assert error["code"] == HEADER_MISMATCH == -32020
+    return error
+
+
+async def test_protocol_version_header_mismatch_is_rejected(app: Starlette) -> None:
+    headers = modern_headers(method="tools/list")
+    headers["MCP-Protocol-Version"] = "2025-11-25"
+    async with app.router.lifespan_context(app), client(app) as http_client:
+        response = await http_client.post(
+            "/mcp",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/list",
+                "params": {"_meta": modern_meta()},
+            },
+        )
+
+    error = _header_mismatch_error(response)
+    assert "mcp-protocol-version" in error["message"].lower()
+
+
+async def test_method_header_mismatch_is_rejected(app: Starlette) -> None:
+    headers = modern_headers(method="tools/call", name="stats")
+    headers["MCP-Method"] = "tools/list"
+    async with app.router.lifespan_context(app), client(app) as http_client:
+        response = await http_client.post(
+            "/mcp",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "tools/call",
+                "params": {
+                    "name": "stats",
+                    "arguments": {"workspace_id": "hetzner"},
+                    "_meta": modern_meta(),
+                },
+            },
+        )
+
+    error = _header_mismatch_error(response)
+    assert "mcp-method" in error["message"].lower()
+
+
+async def test_name_header_mismatch_is_rejected(app: Starlette) -> None:
+    headers = modern_headers(method="tools/call", name="ready")
+    async with app.router.lifespan_context(app), client(app) as http_client:
+        response = await http_client.post(
+            "/mcp",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 13,
+                "method": "tools/call",
+                "params": {
+                    "name": "stats",
+                    "arguments": {"workspace_id": "hetzner"},
+                    "_meta": modern_meta(),
+                },
+            },
+        )
+
+    error = _header_mismatch_error(response)
+    assert "mcp-name" in error["message"].lower()
