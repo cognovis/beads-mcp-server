@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel
 
 from beads_mcp_server.config import WorkspaceRegistry
@@ -52,8 +53,13 @@ class WorkspaceListResponse(BaseModel):
     workspace_ids: list[str]
 
 
-class ToolExecutionError(RuntimeError):
-    """Safe, coded error detail suitable for an MCP tool response."""
+class ToolExecutionError(ToolError):
+    """Safe, coded error detail suitable for an MCP tool response.
+
+    Subclasses ``ToolError`` so mcp 2.1 still forwards the redacted diagnostic
+    to the client. Unexpected ``RuntimeError`` subclasses are logged as crashes
+    and the client sees only ``Error executing tool <name>``.
+    """
 
 
 class BeadsService:
