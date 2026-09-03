@@ -218,8 +218,10 @@ def _header_mismatch_error(response: httpx.Response) -> dict[str, object]:
 
 
 async def test_protocol_version_header_mismatch_is_rejected(app: Starlette) -> None:
+    # Handshake-era header values take the legacy path and skip this comparison.
+    # A non-handshake header that disagrees with the 2026-07-28 envelope is rejected.
     headers = modern_headers(method="tools/list")
-    headers["MCP-Protocol-Version"] = "2025-11-25"
+    headers["MCP-Protocol-Version"] = "2026-06-18"
     async with app.router.lifespan_context(app), client(app) as http_client:
         response = await http_client.post(
             "/mcp",
