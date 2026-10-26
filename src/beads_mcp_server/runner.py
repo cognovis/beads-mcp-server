@@ -32,7 +32,7 @@ class ReadableStream(Protocol):
     """Minimal asynchronous byte-stream interface used by the runner."""
 
     async def read(self, size: int = -1) -> bytes:
-        """Read up to size bytes."""
+        ...
 
 
 class AsyncProcess(Protocol):
@@ -43,13 +43,13 @@ class AsyncProcess(Protocol):
     returncode: int | None
 
     def terminate(self) -> None:
-        """Request graceful process termination."""
+        ...
 
     def kill(self) -> None:
-        """Force process termination."""
+        ...
 
     async def wait(self) -> int:
-        """Wait for process exit."""
+        ...
 
 
 class ProcessSpawner(Protocol):
@@ -63,7 +63,6 @@ class DefaultProcessSpawner:
     """Create real subprocesses through asyncio's argv-only API."""
 
     async def spawn(self, *argv: str, **kwargs: Any) -> AsyncProcess:
-        """Start an asynchronous subprocess."""
         process = await asyncio.create_subprocess_exec(*argv, **kwargs)
         if process.stdout is None or process.stderr is None:
             raise RuntimeError("bd subprocess pipes were not created")
