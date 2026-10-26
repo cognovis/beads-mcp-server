@@ -86,7 +86,6 @@ async def test_sdk_v2_calls_typed_show_tool(tmp_path: Path) -> None:
 
 
 async def test_regression_claim_preserves_explicit_actor(tmp_path: Path) -> None:
-    """Guard against running a claim as the MCP service identity."""
     server = create_server(make_config(tmp_path), runner=SurfaceRunner())
 
     async with Client(server) as client:
@@ -113,7 +112,6 @@ async def test_regression_claim_preserves_explicit_actor(tmp_path: Path) -> None
 
 
 async def test_regression_close_preserves_claim_actor(tmp_path: Path) -> None:
-    """Guard against closing an agent claim as the MCP service identity."""
     server = create_server(make_config(tmp_path), runner=SurfaceRunner())
 
     async with Client(server) as client:
